@@ -2,25 +2,48 @@
 
 var generatorHelper = require('@prisma/generator-helper');
 var typescript = require('typescript');
-var zod = require('zod');
+var z = require('zod');
 var path = require('path');
 var tsMorph = require('ts-morph');
 var parenthesis = require('parenthesis');
 
 function _interopDefaultLegacy (e) { return e && typeof e === 'object' && 'default' in e ? e : { 'default': e }; }
 
+function _interopNamespace(e) {
+	if (e && e.__esModule) return e;
+	var n = Object.create(null);
+	if (e) {
+		Object.keys(e).forEach(function (k) {
+			if (k !== 'default') {
+				var d = Object.getOwnPropertyDescriptor(e, k);
+				Object.defineProperty(n, k, d.get ? d : {
+					enumerable: true,
+					get: function () { return e[k]; }
+				});
+			}
+		});
+	}
+	n["default"] = e;
+	return n;
+}
+
+var z__namespace = /*#__PURE__*/_interopNamespace(z);
 var path__default = /*#__PURE__*/_interopDefaultLegacy(path);
 
 var version = "0.5.6";
 
-const configBoolean = /*#__PURE__*/zod.z.enum(['true', 'false']).transform(arg => JSON.parse(arg));
-const configSchema = /*#__PURE__*/zod.z.object({
-  relationModel: /*#__PURE__*/configBoolean.default('true').or( /*#__PURE__*/zod.z.literal('default')),
-  modelSuffix: /*#__PURE__*/zod.z.string().default('Model'),
-  modelCase: /*#__PURE__*/zod.z.enum(['PascalCase', 'camelCase']).default('PascalCase'),
-  useDecimalJs: /*#__PURE__*/configBoolean.default('false'),
-  imports: /*#__PURE__*/zod.z.string().optional(),
-  prismaJsonNullability: /*#__PURE__*/configBoolean.default('true')
+const stringBoolean = /*#__PURE__*/z__namespace.string().refine(v => v === 'true' || v === 'false');
+const configBoolean = /*#__PURE__*/stringBoolean.default('true').transform(v => v === 'true');
+const relationModelString = /*#__PURE__*/z__namespace.string().refine(v => v === 'default' || v === 'true' || v === 'false');
+const relationModel = /*#__PURE__*/relationModelString.transform(v => v === 'default' ? 'default' : v === 'true');
+const modelCaseString = /*#__PURE__*/z__namespace.string().refine(v => v === 'PascalCase' || v === 'camelCase');
+const configSchema = /*#__PURE__*/z__namespace.object({
+  relationModel: relationModel,
+  modelSuffix: /*#__PURE__*/z__namespace.string().default('Model'),
+  modelCase: /*#__PURE__*/modelCaseString.default('PascalCase'),
+  useDecimalJs: configBoolean,
+  imports: /*#__PURE__*/z__namespace.string().optional(),
+  prismaJsonNullability: configBoolean
 });
 
 const writeArray = (writer, array, newLine = true) => array.forEach(line => writer.write(line).conditionalNewLine(newLine));
@@ -167,7 +190,9 @@ const writeImportsForModel = (model, sourceFile, config, {
     });
   }
 
-  if (config.useDecimalJs && model.fields.some(f => f.type === 'Decimal')) {
+  const hasNonCustomDecimalFieldForImports = model.fields.some(f => f.type === 'Decimal' && (!f.documentation || !computeCustomSchema(f.documentation)));
+
+  if (config.useDecimalJs && hasNonCustomDecimalFieldForImports) {
     importList.push({
       kind: tsMorph.StructureKind.ImportDeclaration,
       namedImports: ['Decimal'],
@@ -206,11 +231,13 @@ const writeTypeSpecificSchemas = (model, sourceFile, config, _prismaOptions) => 
   if (model.fields.some(f => f.type === 'Json')) {
     sourceFile.addStatements(writer => {
       writer.newLine();
-      writeArray(writer, ['// Helper schema for JSON fields', `type Literal = boolean | number | string${config.prismaJsonNullability ? '' : '| null'}`, 'type Json = Literal | { [key: string]: Json } | Json[]', `const literalSchema = z.union([z.string(), z.number(), z.boolean()${config.prismaJsonNullability ? '' : ', z.null()'}])`, 'const jsonSchema: z.ZodSchema<Json> = z.lazy(() => z.union([literalSchema, z.array(jsonSchema), z.record(jsonSchema)]))']);
+      writeArray(writer, ['// Helper schema for JSON fields', `type Literal = boolean | number | string${config.prismaJsonNullability ? '' : '| null'}`, 'type Json = Literal | { [key: string]: Json } | Json[]', `const literalSchema = z.union([z.string(), z.number(), z.boolean()${config.prismaJsonNullability ? '' : ', z.null()'}])`, 'const jsonSchema: z.ZodSchema<Json> = z.lazy(() => z.union([literalSchema, z.array(jsonSchema), z.record(z.string(), jsonSchema)]))']);
     });
   }
 
-  if (config.useDecimalJs && model.fields.some(f => f.type === 'Decimal')) {
+  const hasNonCustomDecimalField = model.fields.some(f => f.type === 'Decimal' && (!f.documentation || !computeCustomSchema(f.documentation)));
+
+  if (config.useDecimalJs && hasNonCustomDecimalField) {
     sourceFile.addStatements(writer => {
       writer.newLine();
       writeArray(writer, ['// Helper schema for Decimal fields', 'z', '.instanceof(Decimal)', '.or(z.string())', '.or(z.number())', '.refine((value) => {', '  try {', '    return new Decimal(value);', '  } catch (error) {', '    return false;', '  }', '})', '.transform((value) => new Decimal(value));']);

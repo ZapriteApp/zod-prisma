@@ -9,6 +9,7 @@ import {
 import { Config, PrismaOptions } from './config'
 import { dotSlash, needsRelatedModel, useModelNames, writeArray } from './util'
 import { getJSDocs, getZodDocElements } from './docs'
+import { computeCustomSchema } from './docs'
 import { getZodConstructor } from './types'
 
 export const writeImportsForModel = (
@@ -36,7 +37,10 @@ export const writeImportsForModel = (
 		})
 	}
 
-	if (config.useDecimalJs && model.fields.some((f) => f.type === 'Decimal')) {
+	const hasNonCustomDecimalFieldForImports = model.fields.some(
+		(f) => f.type === 'Decimal' && (!f.documentation || !computeCustomSchema(f.documentation))
+	)
+	if (config.useDecimalJs && hasNonCustomDecimalFieldForImports) {
 		importList.push({
 			kind: StructureKind.ImportDeclaration,
 			namedImports: ['Decimal'],
@@ -97,12 +101,15 @@ export const writeTypeSpecificSchemas = (
 				`const literalSchema = z.union([z.string(), z.number(), z.boolean()${
 					config.prismaJsonNullability ? '' : ', z.null()'
 				}])`,
-				'const jsonSchema: z.ZodSchema<Json> = z.lazy(() => z.union([literalSchema, z.array(jsonSchema), z.record(jsonSchema)]))',
+				'const jsonSchema: z.ZodSchema<Json> = z.lazy(() => z.union([literalSchema, z.array(jsonSchema), z.record(z.string(), jsonSchema)]))',
 			])
 		})
 	}
 
-	if (config.useDecimalJs && model.fields.some((f) => f.type === 'Decimal')) {
+	const hasNonCustomDecimalField = model.fields.some(
+		(f) => f.type === 'Decimal' && (!f.documentation || !computeCustomSchema(f.documentation))
+	)
+	if (config.useDecimalJs && hasNonCustomDecimalField) {
 		sourceFile.addStatements((writer) => {
 			writer.newLine()
 			writeArray(writer, [
